@@ -1,4 +1,4 @@
-package mfccore
+package mfc
 
 import (
     "context"
