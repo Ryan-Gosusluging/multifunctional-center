@@ -11,29 +11,30 @@ import (
 )
 
 type MFC struct {
-    cfg       *config.Settings
+    cfg *config.Settings
     generator *client.Generator
 }
 
 func New(cfg *config.Settings) *MFC {
     return &MFC{
-        cfg:       cfg,
+        cfg: cfg,
         generator: client.NewGenerator(),
     }
 }
 
-func (m *MFC) Run(ctx context.Context) {
+func (m *MFC) Work(ctx context.Context) {
     clientChan := make(chan client.Client)
-    sem := make(chan struct{}, m.cfg.WindowCount)
-    
+    windowChan := make(chan int, m.cfg.WindowCount) // Канал с номерами окон
+    for i := 1; i <= m.cfg.WindowCount; i++ {
+        windowChan <- i
+    }
     // Инициализация семафора
+    sem := make(chan struct{}, m.cfg.WindowCount)
     for i := 0; i < m.cfg.WindowCount; i++ {
         sem <- struct{}{}
     }
-
     var wg sync.WaitGroup
-
-    // Генератор клиентов
+    // Генератор клиентов (горутина)
     go func() {
         for {
             select {
@@ -48,33 +49,35 @@ func (m *MFC) Run(ctx context.Context) {
             }
         }
     }()
-
-    // Обработчик
     wg.Add(1)
     go func() {
         defer wg.Done()
         for c := range clientChan {
-            <-sem
-            
+            <-sem // Захватываем семафор (свободное окно)
+            windowNum := <-windowChan // Получаем номер окна
             wg.Add(1)
-            go func(currentClient client.Client) {
-                defer wg.Done()
-                defer func() { sem <- struct{}{} }()
+            go func(client client.Client, wn int) {
+                defer func() {
+                    sem <- struct{}{} // Освобождаем семафор
+                    windowChan <- wn  // Возвращаем номер окна
+                    wg.Done()
+                }()
 
                 serviceTime := utils.RandomDuration(m.cfg.MinServiceTime, m.cfg.MaxServiceTime)
-                fmt.Printf("Клиент %d начал обслуживание (%v)\n", currentClient.Number, serviceTime)
+                fmt.Printf("Окно %d: Клиент %d начал обслуживание (%v)\n", 
+                    wn, client.Number, serviceTime)
 
                 select {
                 case <-time.After(serviceTime):
-                    fmt.Printf("Клиент %d обслужен\n", currentClient.Number)
+                    fmt.Printf("Окно %d: Клиент %d обслужен\n", wn, client.Number)
                 case <-ctx.Done():
-                    fmt.Printf("Обслуживание клиента %d прервано\n", currentClient.Number)
+                    fmt.Printf("Окно %d: Обслуживание клиента %d прервано\n", wn, client.Number)
                 }
-            }(c)
+            }(c, windowNum)
         }
     }()
-
     wg.Wait()
+    close(windowChan)
     close(sem)
     fmt.Println("МФЦ закрылся")
 }
