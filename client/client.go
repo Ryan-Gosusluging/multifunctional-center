@@ -13,9 +13,13 @@ type Generator struct {
     mu      sync.Mutex
 }
 
-func (g *Generator) Generate() *Client {
+func NewGenerator() *Generator {
+    return &Generator{}
+}
+
+func (g *Generator) Generate() Client {
     g.mu.Lock()
     defer g.mu.Unlock()
     g.counter++
-    return &Client{Number: g.counter}
+    return Client{Number: g.counter}
 }
